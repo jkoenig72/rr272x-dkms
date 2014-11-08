@@ -1,6 +1,6 @@
 MAKE="make -C product/rr272x/linux/ KERNELDIR=/lib/modules/${kernelver}/build"
 CLEAN="make -C product/rr272x/linux/ clean"
-BUILT_MODULE_NAME=rr272x
+BUILT_MODULE_NAME=rr272x_1x
 DEST_MODULE_LOCATION=/kernel/drivers/scsi/
 BUILT_MODULE_LOCATION=product/rr272x/linux/
 PACKAGE_VERSION="1.5"
