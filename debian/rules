@@ -1,9 +1,0 @@
-#!/usr/bin/make -f
-
-%:
-	dh "$@" --with dkms
-
-override_dh_auto_clean:
-
-override_dh_auto_build:
-
