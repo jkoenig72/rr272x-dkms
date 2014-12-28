@@ -1,38 +1,41 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
+
   <head>
-    <meta charset="utf-8">
+    <meta charset='utf-8'>
     <meta http-equiv="X-UA-Compatible" content="chrome=1">
-    <title>rr272x-dkms by lhw</title>
+    <meta name="description" content="rr272x-dkms : Debian package which adds the &quot;open-source&quot; rr272x driver as dkms module">
 
-    <link rel="stylesheet" href="stylesheets/styles.css">
-    <link rel="stylesheet" href="stylesheets/pygment_trac.css">
-    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-    <!--[if lt IE 9]>
-    <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
-    <![endif]-->
+    <link rel="stylesheet" type="text/css" media="screen" href="stylesheets/stylesheet.css">
+
+    <title>rr272x-dkms</title>
   </head>
+
   <body>
-    <div class="wrapper">
-      <header>
-        <h1>rr272x-dkms</h1>
-        <p>Debian package which adds the &quot;open-source&quot; rr272x driver as dkms module</p>
 
-        <p class="view"><a href="https://github.com/lhw/rr272x-dkms">View the Project on GitHub <small>lhw/rr272x-dkms</small></a></p>
+    <!-- HEADER -->
+    <div id="header_wrap" class="outer">
+        <header class="inner">
+          <a id="forkme_banner" href="https://github.com/lhw/rr272x-dkms">View on GitHub</a>
 
+          <h1 id="project_title">rr272x-dkms</h1>
+          <h2 id="project_tagline">Debian package which adds the &quot;open-source&quot; rr272x driver as dkms module</h2>
 
-        <ul>
-          <li><a href="https://github.com/lhw/rr272x-dkms/zipball/master">Download <strong>ZIP File</strong></a></li>
-          <li><a href="https://github.com/lhw/rr272x-dkms/tarball/master">Download <strong>TAR Ball</strong></a></li>
-          <li><a href="https://github.com/lhw/rr272x-dkms">View On <strong>GitHub</strong></a></li>
-        </ul>
-      </header>
-      <section>
+            <section id="downloads">
+              <a class="zip_download_link" href="https://github.com/lhw/rr272x-dkms/zipball/master">Download this project as a .zip file</a>
+              <a class="tar_download_link" href="https://github.com/lhw/rr272x-dkms/tarball/master">Download this project as a tar.gz file</a>
+            </section>
+        </header>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div id="main_content_wrap" class="outer">
+      <section id="main_content" class="inner">
         <h3>
 <a id="rr272x-dkms" class="anchor" href="#rr272x-dkms" aria-hidden="true"><span class="octicon octicon-link"></span></a>rr272x-dkms</h3>
 
 <p>This is the packaging for the HighPoint RocketRaid 2710-2722 models.
-The original driver can be obtained on the <a href="http://www.highpoint-tech.com/USA_new/CS-PCI-E_2_0_x8_Configuration.html">HighPoint website</a>. <strong>The driver only works up to Linux 3.8.4 for now.</strong></p>
+The original driver can be obtained on the <a href="http://www.highpoint-tech.com/USA_new/CS-PCI-E_2_0_x8_Configuration.html">HighPoint website</a>. <strong>The driver is updated to the not yet officially available 1.6.1 release and should work with all newer kernels &gt;3.8 just as well</strong></p>
 
 <p>The only part of the driver which is actually open-source is the kernel interface. Everything else is just blobs.
 So it can't really be considered OSS and it's unlikely that it will ever be included in the debian package tree.
@@ -43,12 +46,17 @@ echo "deb http://p.l42.at/debian wheezy main" | sudo tee /etc/apt/sources.list.d
 sudo apt-get update &amp;&amp; sudo apt-get install rr272x-dkms
 </code></pre>
       </section>
-      <footer>
-        <p>This project is maintained by <a href="https://github.com/lhw">lhw</a></p>
-        <p><small>Hosted on GitHub Pages &mdash; Theme by <a href="https://github.com/orderedlist">orderedlist</a></small></p>
+    </div>
+
+    <!-- FOOTER  -->
+    <div id="footer_wrap" class="outer">
+      <footer class="inner">
+        <p class="copyright">rr272x-dkms maintained by <a href="https://github.com/lhw">lhw</a></p>
+        <p>Published with <a href="http://pages.github.com">GitHub Pages</a></p>
       </footer>
     </div>
-    <script src="javascripts/scale.fix.js"></script>
+
     
+
   </body>
 </html>
