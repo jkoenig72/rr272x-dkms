@@ -368,7 +368,11 @@ static int hpt_detect (Scsi_Host_Template *tpnt)
 		scsi_set_pci_device(host, vbus_ext->hba_list->pcidev);
 		host->irq = vbus_ext->hba_list->pcidev->irq;
 
+#ifdef CONFIG_SCSI_PROC_FS
 		host->max_id = osm_max_targets;
+#else 
+		host->max_id = osm_max_targets +1;
+#endif
 		host->max_lun = 1;
 		host->max_channel = 0;
 		scsi_set_max_cmd_len(host, 16);
@@ -914,6 +918,101 @@ static int hpt_queuecommand_lck (Scsi_Cmnd * SCpnt, void (*done) (Scsi_Cmnd *))
 		SCpnt->result = DID_BAD_TARGET << 16;
 		goto cmd_done;
 	}
+#ifndef CONFIG_SCSI_PROC_FS
+	if (sc_target(SCpnt) == osm_max_targets) {
+		if (SCpnt->cmnd[0]== INQUIRY) {
+			PINQUIRYDATA inquiryData;
+			int buflen;
+			HPT_U8 *rbuf;
+			
+			if ((buflen = scsicmd_buf_get(SCpnt, (void **)&inquiryData))<36) {
+				scsicmd_buf_put(SCpnt, inquiryData);
+				SCpnt->result = ((DRIVER_INVALID|SUGGEST_ABORT)<<24) | (DID_ABORT<<16);
+				goto cmd_done;
+			}
+
+			memset(inquiryData, 0, buflen);
+			if (SCpnt->cmnd[1] & 1) {
+				rbuf = (HPT_U8 *)inquiryData;
+				switch(SCpnt->cmnd[2]) {
+				case 0:
+					rbuf[0] = 0;
+					rbuf[1] = 0;
+					rbuf[2] = 0;
+					rbuf[3] = 3;
+					rbuf[4] = 0;
+					rbuf[5] = 0x80;
+					rbuf[6] = 0x83;
+					SCpnt->result = (DID_OK<<16);
+					break;
+				case 0x80: 
+					rbuf[0] = 0;
+					rbuf[1] = 0x80;
+					rbuf[2] = 0;
+					rbuf[3] = 1;
+					rbuf[4] = 0x20;
+					SCpnt->result = (DID_OK<<16);				
+					break;
+				case 0x83:
+					rbuf[0] = 0;
+					rbuf[1] = 0x83;
+					rbuf[2] = 0;
+					rbuf[3] = 12; 
+					rbuf[4] = 1;
+					rbuf[5] = 2; 
+					rbuf[6] = 0;
+					rbuf[7] = 8; 
+					rbuf[8] = 0; 
+					rbuf[9] = 0x19;
+					rbuf[10] = 0x3C;
+					rbuf[11] = 0;
+					rbuf[12] = 0;
+					rbuf[13] = 0;
+					rbuf[14] = 0;
+					rbuf[15] = 0;
+					SCpnt->result = (DID_OK<<16);				
+					break;
+				default:
+					scsi_check_condition(SCpnt, ILLEGAL_REQUEST, 0x24, 0);
+					break;
+				}
+
+				scsicmd_buf_put(SCpnt, inquiryData);
+			} else if (SCpnt->cmnd[2]) {
+				scsi_check_condition(SCpnt, ILLEGAL_REQUEST, 0x24, 0);
+				scsicmd_buf_put(SCpnt, inquiryData);			
+			}
+			 else {
+				inquiryData->Versions = 5; /* SPC-3 */
+				inquiryData->DeviceType = 3; /* PROCESSOR_DEVICE */
+				inquiryData->AdditionalLength = 31;
+				inquiryData->Versions = 0x5;
+				inquiryData->CommandQueue = 1;
+				memcpy(&inquiryData->VendorId, "HPT     ", 8);
+				memcpy(&inquiryData->ProductId, "RCM DEVICE      ", 16);
+				memcpy(&inquiryData->ProductRevisionLevel, "4.00", 4);
+
+				scsicmd_buf_put(SCpnt, inquiryData);
+				SCpnt->result = (DID_OK<<16);
+			}
+		}
+		else if (SCpnt->cmnd[0] == START_STOP ||
+			SCpnt->cmnd[0] == TEST_UNIT_READY) {
+			SCpnt->result = (DID_OK<<16);
+		}
+		else if (SCpnt->cmnd[0] == 2 /*SCSIOP_HPT_IOCTL*/ &&
+			SCpnt->cmnd[1] == 'H' &&
+			SCpnt->cmnd[2] == 'P' &&
+			SCpnt->cmnd[3] == 'T') {
+				hpt_do_async_ioctl(SCpnt);
+				return 0;
+		}
+		else {
+			scsi_check_condition(SCpnt,  ILLEGAL_REQUEST, 0x20, 0);
+		}
+		goto cmd_done;
+	}
+#endif
 
 	pVDev = ldm_find_target(vbus, sc_target(SCpnt));
 
@@ -1002,7 +1101,8 @@ static int hpt_queuecommand_lck (Scsi_Cmnd * SCpnt, void (*done) (Scsi_Cmnd *))
 		
 		
 		if (mIsArray(pVDev->type)) {
-			goto invalid;
+			SCpnt->result = ((DRIVER_INVALID|SUGGEST_ABORT)<<24) | (DID_ABORT<<16);
+			break;
 		}
 
 		HPT_ASSERT(pVDev->type == VD_RAW && pVDev->u.raw.legacy_disk);
@@ -1130,7 +1230,8 @@ set_sense:
 
 		if ((buflen = scsicmd_buf_get(SCpnt, (void **)&inquiryData))<36) {
 			scsicmd_buf_put(SCpnt, inquiryData);
-			goto invalid;
+			SCpnt->result = ((DRIVER_INVALID|SUGGEST_ABORT)<<24) | (DID_ABORT<<16);
+			break;
 		}
 
 		memset(inquiryData, 0, buflen);
@@ -1248,7 +1349,8 @@ set_sense:
 
 		if (scsicmd_buf_get(SCpnt, (void **)&rbuf)<8) {
 			scsicmd_buf_put(SCpnt, rbuf);
-			goto invalid;
+			SCpnt->result = ((DRIVER_INVALID|SUGGEST_ABORT)<<24) | (DID_ABORT<<16);
+			break;
 		}
 
 		if (mIsArray(pVDev->type))
@@ -1286,7 +1388,8 @@ set_sense:
 
 			if (scsicmd_buf_get(SCpnt, (void **)&rbuf)<12) {
 				scsicmd_buf_put(SCpnt, rbuf);
-				goto invalid;
+				SCpnt->result = ((DRIVER_INVALID|SUGGEST_ABORT)<<24) | (DID_ABORT<<16);
+				break;
 			}
 			rbuf[0] = (u8)(cap>>56);
 			rbuf[1] = (u8)(cap>>48);
@@ -1412,8 +1515,8 @@ set_sense:
 		break;
 
 	default:
-invalid:
-		SCpnt->result = ((DRIVER_INVALID|SUGGEST_ABORT)<<24) | (DID_ABORT<<16);
+		hpt_scsi_set_sense(SCpnt, ILLEGAL_REQUEST, 0x20, 0x0);
+		SCpnt->result = ((DRIVER_SENSE<<24) | (DID_OK<<16) | HPT_SAM_STAT_CHECK_CONDITION);
 		break;
 	}
 cmd_done:
@@ -1639,6 +1742,122 @@ static int hpt_release (struct Scsi_Host *host)
 	return 0;
 }
 
+#ifndef CONFIG_SCSI_PROC_FS
+static void  __hpt_do_async_ioctl(PVBUS vbus,IOCTL_ARG* ioctl_args)
+{
+	PIOCTL_CMD ioctl_cmd;
+	ioctl_cmd = ioctl_args->ioctl_cmnd;
+	ioctl_cmd->vbus = vbus;
+	ldm_ioctl(vbus, ioctl_args);
+	return;	
+
+}
+
+static void hpt_async_ioctl_done(struct _IOCTL_ARG *arg)
+{
+	PIOCTL_CMD ioctl_cmd = arg->ioctl_cmnd;
+	PVBUS vbus;
+	PVBUS_EXT vbus_ext;
+	int buflen;
+	HPT_U8 *buf;
+	HPT_ASSERT(ioctl_cmd);
+	ioctl_cmd->SCpnt->result = ((DRIVER_INVALID|SUGGEST_ABORT)<<24) | (DID_ABORT<<16);
+
+	if (arg->result == HPT_IOCTL_RESULT_OK){
+		buflen = scsicmd_buf_get(ioctl_cmd->SCpnt, (void **)&buf);
+		*(HPT_U32 *)buf = *(arg->lpBytesReturned);	
+		if (arg->nOutBufferSize) {
+			memcpy((HPT_U8  *)&(buf [4]),arg->lpOutBuffer, arg->nOutBufferSize);
+		}
+		scsicmd_buf_put(ioctl_cmd->SCpnt, buf);
+		ioctl_cmd->SCpnt->result = (DID_OK<<16);
+
+	}
+	else if (arg->result == HPT_IOCTL_RESULT_FAILED ||arg->result == HPT_IOCTL_RESULT_INVALID || arg->result == HPT_IOCTL_RESULT_RETRY){
+		KdPrint(("receive ioctl_args:%p iocode:%d  result:%x",ioctl_args,ioctl_args->dwIoControlCode&0xff,arg->result));		
+	}
+	else if (arg->result == HPT_IOCTL_RESULT_WRONG_VBUS){
+		arg->result = HPT_IOCTL_RESULT_FAILED;
+		vbus = ldm_get_next_vbus(ioctl_cmd->vbus, (void **)(void *)&vbus_ext);
+		if(vbus){
+		 	__hpt_do_async_ioctl(vbus,arg);
+			return;
+		 }
+	}
+	
+	ioctl_cmd->SCpnt->scsi_done(ioctl_cmd->SCpnt);	
+	if (arg->lpInBuffer){kfree(arg->lpInBuffer);}
+	if (arg->lpOutBuffer){kfree(arg->lpOutBuffer);}
+	kfree(ioctl_cmd);
+}
+
+
+void hpt_do_async_ioctl(Scsi_Cmnd * SCpnt)
+{
+	int buflen = 0;
+	HPT_U8 *buf = 0;
+	IOCTL_ARG* ioctl_args = 0;
+	PIOCTL_CMD ioctl_cmd = 0;
+	PVBUS vbus;
+	PVBUS_EXT vbus_ext;
+	if ((buflen = scsicmd_buf_get(SCpnt, (void **)&buf))<4) {
+		OsPrint(("invalid ioctl cmd,return"));
+		goto deal_err;
+	}	
+
+	if(!(ioctl_cmd = kmalloc(sizeof(IOCTL_CMD), GFP_ATOMIC))){
+		OsPrint(("not got memory for ioctl_cmd"));
+		goto deal_err;
+	}
+	memset(ioctl_cmd,0,sizeof(IOCTL_CMD));
+
+	ioctl_args = & ioctl_cmd->ioctl_args;
+	ioctl_args->lpBytesReturned = & ioctl_cmd->bytesReturned;	
+	ioctl_args->dwIoControlCode = HPT_CTL_CODE( *(HPT_U32 *)(&SCpnt->cmnd[4]));
+	ioctl_args->nInBufferSize = *(HPT_U32 *)(&SCpnt->cmnd[8]);
+	ioctl_args->nOutBufferSize = *(HPT_U32 *)(&SCpnt->cmnd[12]);
+
+	if (ioctl_args->nInBufferSize) {
+		ioctl_args->lpInBuffer = kmalloc(ioctl_args->nInBufferSize, GFP_ATOMIC);
+		if (!ioctl_args->lpInBuffer){
+			OsPrint(("not got memory for lpInBuffer"));
+			goto deal_err;
+		}
+		memcpy((HPT_U8*)(ioctl_args->lpInBuffer),buf, ioctl_args->nInBufferSize);
+	}
+
+	if (ioctl_args->nOutBufferSize) {
+		ioctl_args->lpOutBuffer = kmalloc(ioctl_args->nOutBufferSize, GFP_ATOMIC);
+		if (!ioctl_args->lpOutBuffer){
+			OsPrint(("not got memory for lpOutBuffer"));
+			goto deal_err;
+		}
+		memset(ioctl_args->lpOutBuffer,0,ioctl_args->nOutBufferSize);
+	}
+	scsicmd_buf_put(SCpnt, buf);
+
+	ioctl_args->done = hpt_async_ioctl_done;
+	ioctl_args->ioctl_cmnd = ioctl_cmd;
+	ioctl_cmd->SCpnt =  SCpnt;
+	ioctl_args->result = -1;
+	
+	KdPrint(("send ioctl_args:%p iocode:%d",ioctl_args,ioctl_args->dwIoControlCode&0xff));
+
+	vbus = ldm_get_next_vbus(0, (void **)(void *)&vbus_ext);		
+	__hpt_do_async_ioctl(vbus,ioctl_args);
+	return;	
+	
+deal_err:
+	scsicmd_buf_put(SCpnt, buf);
+	SCpnt->result = ((DRIVER_INVALID|SUGGEST_ABORT)<<24) | (DID_ABORT<<16);
+	SCpnt->scsi_done(SCpnt);
+	if (ioctl_cmd && ioctl_args->lpInBuffer) kfree(ioctl_args->lpInBuffer);
+	if (ioctl_cmd && ioctl_args->lpOutBuffer) kfree(ioctl_args->lpOutBuffer);
+	if(ioctl_cmd) kfree(ioctl_cmd);
+	return ;
+}
+#endif
+
 static void hpt_ioctl_done(struct _IOCTL_ARG *arg)
 {
 	up((struct semaphore *)arg->ioctl_cmnd);
@@ -1807,6 +2026,7 @@ invalid:
 	return -EINVAL;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 static int hpt_proc_info26(struct Scsi_Host *host, char *buffer, char **start,
 					off_t offset, int length, int inout)
 {
@@ -1830,6 +2050,18 @@ static int hpt_proc_info24(char *buffer,char **start, off_t offset,
 	}
 
 	return -EINVAL;
+}
+#endif
+
+#else 
+static int hpt_proc_info310_get(struct seq_file * seq_info, struct Scsi_Host * host)
+{
+	seq_info->count = hpt_proc_get_info(host, seq_info->buf,0, 0, seq_info->size);
+	return 0;
+}
+static int hpt_proc_info310_set(struct Scsi_Host * host, char * buf, int length)
+{
+	return hpt_proc_set_info(host, buf, length);
 }
 #endif
 
@@ -1871,11 +2103,18 @@ static int hpt_do_disk_ioctl(HPT_U32 diskid, int cmd, void * arg)
 	case 0x031f: /* CMD: HDIO_DRIVER_CMD */
 		offset=4;
 		switch ( ide_passthrough_header.bCommandReg ) {
+		/* IDLE */
+		case 0xe3 :
+			if (copy_from_user(&ide_passthrough_header.bSectorCountReg, arg+1, 1) )
+				return -EINVAL;
+			break;
+		/* Set Features */
+		case 0xef :
+			if (copy_from_user(&ide_passthrough_header.bSectorCountReg, arg+1, 1) )
+				return -EINVAL;
+			break;
 		/* CHECK_POWER_MODE */
 		case 0xe5 :
-			ide_passthrough_header.protocol = IO_COMMAND_READ;
-			/* Though smart monitor only copies one byte, error appears here if set to 1 */
-			copydata = 512;
 			break;
 		/* IDENTITY */
 		case 0xec :
@@ -1929,11 +2168,13 @@ static int hpt_do_disk_ioctl(HPT_U32 diskid, int cmd, void * arg)
 		break;
 
 	case 0x031d: /* HDIO_DRIVER_TASKFILE */
-		if ( copy_from_user(&ide_passthrough_header.bCommandReg, arg+7, 1)
+		if ( copy_from_user(&ide_passthrough_header.bFeaturesReg, arg+1, 1)
 		   ||copy_from_user(&ide_passthrough_header.bSectorCountReg, arg+2, 1)
 		   ||copy_from_user(&ide_passthrough_header.bLbaLowReg, arg+3, 1)
+		   ||copy_from_user(&ide_passthrough_header.bLbaMidReg, arg+4, 1)
+		   ||copy_from_user(&ide_passthrough_header.bLbaHighReg, arg+5, 1)
 		   ||copy_from_user(&ide_passthrough_header.bDriveHeadReg, arg+6, 1)
-		   ||copy_from_user(&ide_passthrough_header.bFeaturesReg, arg+1, 1) )
+		   ||copy_from_user(&ide_passthrough_header.bCommandReg, arg+7, 1) )
 			return -EINVAL;
 
 		ide_passthrough_header.protocol=IO_COMMAND_WRITE;
@@ -1968,6 +2209,7 @@ static int hpt_do_disk_ioctl(HPT_U32 diskid, int cmd, void * arg)
 	ioctl_arg.lpOutBuffer=buff+sizeof(IDE_PASS_THROUGH_HEADER);
 
 	if ( ide_passthrough_header.protocol==IO_COMMAND_WRITE && copydata ) {
+		ioctl_arg.lpOutBuffer=buff+sizeof(IDE_PASS_THROUGH_HEADER)+copydata;
 		if ( hpt_verify_area(VERIFY_READ, (void *)(HPT_UPTR)(arg+40), copydata)
 		   ||copy_from_user(buff+sizeof(IDE_PASS_THROUGH_HEADER), arg+40, copydata) ) {
 			KdPrint(("Got bad user address"));
@@ -1986,19 +2228,26 @@ static int hpt_do_disk_ioctl(HPT_U32 diskid, int cmd, void * arg)
 		ldm_ide_fixstring((HPT_U8*)pIdentify->SerialNumber,sizeof(pIdentify->SerialNumber));
 		break;
 	case 0x031d:
-		if (copy_to_user(arg, buff+sizeof(IDE_PASS_THROUGH_HEADER)+7, 1) ||
-			copy_to_user(arg+1, buff+sizeof(IDE_PASS_THROUGH_HEADER)+1, 6) )
-			goto invalid;
+		if ( copy_to_user(arg+1,&((PIDE_PASS_THROUGH_HEADER)ioctl_arg.lpOutBuffer)->bFeaturesReg, 1)
+		   ||copy_to_user(arg+2,&((PIDE_PASS_THROUGH_HEADER)ioctl_arg.lpOutBuffer)->bSectorCountReg, 1)
+		   ||copy_to_user(arg+3,&((PIDE_PASS_THROUGH_HEADER)ioctl_arg.lpOutBuffer)->bLbaLowReg, 1)
+		   ||copy_to_user(arg+4,&((PIDE_PASS_THROUGH_HEADER)ioctl_arg.lpOutBuffer)->bLbaMidReg, 1)
+		   ||copy_to_user(arg+5,&((PIDE_PASS_THROUGH_HEADER)ioctl_arg.lpOutBuffer)->bLbaHighReg, 1)
+		   ||copy_to_user(arg+6,&((PIDE_PASS_THROUGH_HEADER)ioctl_arg.lpOutBuffer)->bDriveHeadReg, 1)
+		   ||copy_to_user(arg+7,&((PIDE_PASS_THROUGH_HEADER)ioctl_arg.lpOutBuffer)->bCommandReg, 1) )
+			return -EINVAL;
 		break;
 	case 0x031f:
-		if( copy_to_user(arg+1, buff+sizeof(IDE_PASS_THROUGH_HEADER)+1, 7) )
-			goto invalid;
+			if(copy_to_user(arg, &((PIDE_PASS_THROUGH_HEADER)ioctl_arg.lpOutBuffer)->bCommandReg,1) ||/*status */
+			copy_to_user(arg+1,&((PIDE_PASS_THROUGH_HEADER)ioctl_arg.lpOutBuffer)->bFeaturesReg,1)||/*error */
+			copy_to_user(arg+2,&((PIDE_PASS_THROUGH_HEADER)ioctl_arg.lpOutBuffer)->bSectorCountReg,1))/*nsector */
+				goto invalid;
 		break;
 	default:
 		
-		if (copy_to_user(arg, buff+sizeof(IDE_PASS_THROUGH_HEADER)+7, 1) ||
-			copy_to_user(arg+1, buff+sizeof(IDE_PASS_THROUGH_HEADER)+3, 1) ||
-			copy_to_user(arg+2, buff+sizeof(IDE_PASS_THROUGH_HEADER)+2, 1) )
+		if(copy_to_user(arg, &((PIDE_PASS_THROUGH_HEADER)ioctl_arg.lpOutBuffer)->bCommandReg,1) ||/*status */
+		copy_to_user(arg+1,&((PIDE_PASS_THROUGH_HEADER)ioctl_arg.lpOutBuffer)->bFeaturesReg,1)||/*error */
+		copy_to_user(arg+2,&((PIDE_PASS_THROUGH_HEADER)ioctl_arg.lpOutBuffer)->bSectorCountReg,1))/*nsector */
 			goto invalid;
 		break;
 	}
@@ -2123,7 +2372,12 @@ static Scsi_Host_Template driver_template = {
 	#endif
 #else /* 2.6.x */
 	proc_name:               driver_name,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
 	proc_info:               hpt_proc_info26,
+#else 
+	show_info:		hpt_proc_info310_get,
+	write_info:		hpt_proc_info310_set,
+#endif
 	max_sectors:             128,
 #endif
 	this_id:                 -1

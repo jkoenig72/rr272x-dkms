@@ -36,7 +36,7 @@ Copyright (C) 2013 HighPoint Technologies, Inc. All rights reserved.
 2. Build the driver as a kernel module
 #############################################################################
 
-  NOTE: The latest tested kernel version: 3.8.4.
+  NOTE: The latest tested kernel version: 3.10.5.
   
   1) Install kernel build tools (gcc, binutils, make, etc.)
   
@@ -152,7 +152,16 @@ Copyright (C) 2013 HighPoint Technologies, Inc. All rights reserved.
 3. Revision History
 #############################################################################
 
-   v1.5 03/25/2013
+   v1.6.1 12/26/2013
+     * Support WebGUI for OSes that not suport SCSI_PROC_FS,through SG_IO. 
+
+   v1.5.3 08/16/2013
+     * Support Linux kernel up to 3.10.
+
+   v1.5.1 08/12/2013
+     * Add support SGPIO LED.
+
+   v1.5  03/25/2013
      * Add support Marvell 9715 chipset PM.
      * Fixed a compatibility issue with WD 4TB SAS HDD.
      * Add support EJ340.
