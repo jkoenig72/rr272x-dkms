@@ -149,13 +149,13 @@ debian | ubuntu )
 			rm /boot/initrd.img-${MODVER}
 		fi
 	fi
-	if [ -f /etc/initramfs-tools/initramfs.conf ]; then
-		if grep ^ROOTDELAY -s -q /etc/initramfs-tools/initramfs.conf; then
-			sed -i s"#^ROOTDELAY.*#ROOTDELAY=180#" /etc/initramfs-tools/initramfs.conf
-		else
-			echo "ROOTDELAY=180" >> /etc/initramfs-tools/initramfs.conf
-		fi
-	fi
+#	if [ -f /etc/initramfs-tools/initramfs.conf ]; then
+#		if grep ^ROOTDELAY -s -q /etc/initramfs-tools/initramfs.conf; then
+#			sed -i s"#^ROOTDELAY.*#ROOTDELAY=180#" /etc/initramfs-tools/initramfs.conf
+#		else
+#			echo "ROOTDELAY=180" >> /etc/initramfs-tools/initramfs.conf
+#		fi
+#	fi
 	$MKINITRD -o /boot/initrd.img-${MODVER} ${MODVER}
 ;;
 * )

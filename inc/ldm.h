@@ -486,7 +486,8 @@ void ldm_suspend(PVBUS vbus);
 void ldm_resume(PVBUS vbus);
 LDM_ADAPTER *ldm_resume_adapter(PVBUS vbus, PLDM_ADAPTER ldm_adapter);
 void ldm_shutdown(PVBUS vbus);/*shutdown all the controllers*/
-
+void ldm_pause(PVBUS vbus,HPT_BOOL IsQuiesce);/*quise all disks*/
+    
 
 #define HIM_EVENT_DEVICE_REMOVED 1
 #define HIM_EVENT_DEVICE_PLUGGED 2

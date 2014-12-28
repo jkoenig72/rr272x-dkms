@@ -57,6 +57,8 @@
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
 #include "scsi.h"
 #include <scsi/scsi_ioctl.h>
+/* no sg support in 2.4 */
+#define CONFIG_SCSI_PROC_FS
 #else 
 #include <linux/blkdev.h>
 #include <scsi/scsi_cmnd.h>
@@ -282,6 +284,16 @@ typedef struct _vbus_ext {
 }
 VBUS_EXT, *PVBUS_EXT;
 
+
+typedef struct _ioctl_cmd {
+	IOCTL_ARG ioctl_args;
+	HPT_U32 bytesReturned;
+	Scsi_Cmnd * SCpnt;
+	PVBUS vbus;
+	
+}
+IOCTL_CMD, *PIOCTL_CMD;
+
 #define SD_FLAG_IN_USE     1
 #define SD_FLAG_REVALIDATE 2
 #define SD_FLAG_REMOVE     0x80
@@ -295,6 +307,7 @@ VBUS_EXT, *PVBUS_EXT;
 #define get_vbus_ext(host) (*(PVBUS_EXT *)host->hostdata)
 
 void refresh_sd_flags(PVBUS_EXT vbus_ext);
+void hpt_do_async_ioctl(Scsi_Cmnd * SCpnt);
 void hpt_do_ioctl(IOCTL_ARG *ioctl_args);
 void hpt_stop_tasks(PVBUS_EXT vbus_ext);
 int hpt_proc_get_info(struct Scsi_Host *host, char *buffer, char **start, off_t offset, int length);

@@ -81,6 +81,10 @@ elif test -f $(KERNELDIR)/include/generated/uapi/linux/version.h; then \
     echo $(KERNELDIR)/include/generated/uapi/linux/version.h; \
 fi")
 
+ifeq ($(VERSION_H),)
+$(error Can not find version.h header. Check kernel dir KERNELDIR $(KERNELDIR).)
+endif
+
 MAJOR := $(shell expr `grep LINUX_VERSION_CODE $(VERSION_H) | cut -d\  -f3` / 65536 % 65536)
 MINOR := $(shell expr `grep LINUX_VERSION_CODE $(VERSION_H) | cut -d\  -f3` / 256 % 256)
 KERNEL_VER := $(MAJOR).$(MINOR)
