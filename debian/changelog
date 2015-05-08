@@ -1,3 +1,9 @@
+rr272x (1.6.1-2) unstable; urgency=medium
+
+  * Dependencies updated for jessie
+
+ -- Lennart Weller <lhw@ring0.de>  Fri, 08 May 2015 12:07:27 +0200
+
 rr272x (1.6.1-1) unstable; urgency=medium
 
   * New upstream release
