@@ -284,7 +284,6 @@ typedef struct _vbus_ext {
 }
 VBUS_EXT, *PVBUS_EXT;
 
-
 typedef struct _ioctl_cmd {
 	IOCTL_ARG ioctl_args;
 	HPT_U32 bytesReturned;

@@ -95,6 +95,7 @@ typedef struct _HIM_DEVICE_FLAGS
 	HPT_UINT df_write_cache_enabled :1;
 	HPT_UINT df_cdrom_device        :1;
 	HPT_UINT df_tape_device         :1;
+	HPT_UINT df_changer_device      :1;
 	HPT_UINT df_support_tcq         :1;
 	HPT_UINT df_tcq_enabled         :1;
 	HPT_UINT df_support_ncq         :1;
@@ -172,7 +173,8 @@ IDENTIFY_DATA, *PIDENTIFY_DATA;
 typedef struct _HIM_DEVICE_CONFIG
 {
 	HPT_U64 capacity;
-
+	HPT_U32 logical_sector_size;
+	
 	DEVICE_FLAGS flags;
 
 	HPT_U8  path_id;
@@ -325,6 +327,18 @@ typedef struct _ScsiComm {
 }
 ScsiComm;
 
+typedef struct _ScsiExtComm {
+	HPT_U8  cdbLength;
+	HPT_U8  senseLength; 
+	HPT_U8  scsiStatus; 
+	HPT_U8  reserve1;
+	HPT_U32 dataLength; 
+	HPT_U8  cdb[16];
+	HPT_U8  *senseBuffer;
+	HPT_U8  lun[8];
+}
+ScsiExtComm;
+
 
 #define CTRL_CMD_REBUILD 1
 #define CTRL_CMD_VERIFY  2
@@ -405,6 +419,7 @@ typedef struct _COMMAND
 		AtaComm Ide;
 		PassthroughCmd Passthrough;
 		ScsiComm Scsi;
+		ScsiExtComm ScsiExt;
 		R5ControlCmd R5Control;
 		R1ControlCmd R1Control;
 	} uCmd;
@@ -442,6 +457,7 @@ COMMAND, *PCOMMAND;
 #define   CMD_TYPE_SCSI         CMD_TYPE_ATAPI
 #define   CMD_TYPE_PASSTHROUGH  3
 #define   CMD_TYPE_FLUSH        4
+#define   CMD_TYPE_SCSI_EXT     5
 #define   CMD_TYPE_IO_INDIRECT  0x80 
 
 /* flush command flags */

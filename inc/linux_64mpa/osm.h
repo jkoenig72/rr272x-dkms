@@ -11,7 +11,7 @@
 #define MAX_MEMBERS 64
 
 #define os_max_queue_comm 64
-#define os_max_sg_descriptors 18
+#define os_max_sg_descriptors 130
 
 /*
  *define it in config.c.
@@ -30,6 +30,7 @@ typedef unsigned short HPT_U16;
 typedef unsigned char HPT_U8;
 typedef unsigned long HPT_TIME;
 typedef unsigned long long HPT_U64;
+typedef long long HPT_64;
 
 HPT_U64 CPU_TO_LE64(HPT_U64 x);
 HPT_U32 CPU_TO_LE32(HPT_U32 x);

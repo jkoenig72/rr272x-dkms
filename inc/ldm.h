@@ -218,6 +218,7 @@ typedef struct hpt_raw_disk
 #endif
 	__HPT_RAW_LBA real_capacity;
 	__HPT_RAW_LBA head_position;
+	HPT_U32	logical_sector_size;
 
 	HPT_U16 max_sectors_per_cmd;
 	HPT_U8  max_queue_depth;
@@ -243,6 +244,8 @@ typedef struct hpt_raw_disk
 
 	HPT_UINT  bad_sector : 1;
 	HPT_UINT  df_sas : 1;
+	HPT_UINT  df_tape : 1;
+	HPT_UINT  df_changer : 1;
 
 	HIM  *				him;
 	int 				index;
@@ -471,8 +474,8 @@ void ldm_finish_cmd(PCOMMAND cmd);
 int  ldm_acquire_lock(PVDEV vd, struct lock_request *req);
 void ldm_release_lock(PVDEV vd, struct lock_request *req);
 
-void ldm_queue_task(struct task_queue *tq, struct tq_item *t);
 void ldm_queue_vbus_dpc(PVBUS vbus, struct tq_item *t);
+void ldm_queue_vbus_idle(PVBUS vbus, struct tq_item *t);
 
 HPT_BOOL ldm_intr(PVBUS vbus);
 void ldm_run(PVBUS vbus);
@@ -486,8 +489,7 @@ void ldm_suspend(PVBUS vbus);
 void ldm_resume(PVBUS vbus);
 LDM_ADAPTER *ldm_resume_adapter(PVBUS vbus, PLDM_ADAPTER ldm_adapter);
 void ldm_shutdown(PVBUS vbus);/*shutdown all the controllers*/
-void ldm_pause(PVBUS vbus,HPT_BOOL IsQuiesce);/*quise all disks*/
-    
+
 
 #define HIM_EVENT_DEVICE_REMOVED 1
 #define HIM_EVENT_DEVICE_PLUGGED 2

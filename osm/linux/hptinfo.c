@@ -183,11 +183,39 @@ static void hpt_dump_devinfo(HPT_GET_INFO *pinfo, DEVICEID id, int indent)
 					devinfo.u.device.TargetId+1,
 					devinfo.u.device.IdentifyData.ModelNumber
 				);
+		else if (devinfo.u.device.Flags & DEVICE_FLAG_TAPE){
+			memcpy(sn, devinfo.u.device.IdentifyData.SerialNumber,
+				sizeof(devinfo.u.device.IdentifyData.SerialNumber));
+			ldm_ide_fixstring(sn, (sizeof(sn) & (~1)));
+			sn[sizeof(sn) - 1] = 0;
+			hpt_copy_info(pinfo, "%d/%s%d/%d %s-%s, SAS Tape Device, %s\n",
+				devinfo.u.device.ControllerId+1,
+				(devinfo.u.device.Flags & DEVICE_FLAG_IN_ENCLOSURE) ? "E" : "",
+				devinfo.u.device.PathId+1,
+				devinfo.u.device.TargetId+1,
+				devinfo.u.device.IdentifyData.ModelNumber, sn,
+				(devinfo.u.device.Flags & DEVICE_FLAG_DISABLED)? "Disabled" : "Normal"
+			);
+		}
+		else if (devinfo.u.device.Flags & DEVICE_FLAG_CHANGER){
+			memcpy(sn, devinfo.u.device.IdentifyData.SerialNumber,
+				sizeof(devinfo.u.device.IdentifyData.SerialNumber));
+			ldm_ide_fixstring(sn, (sizeof(sn) & (~1)));
+			sn[sizeof(sn) - 1] = 0;
+			hpt_copy_info(pinfo, "%d/%s%d/%d %s-%s, SAS Changer Device, %s\n",
+				devinfo.u.device.ControllerId+1,
+				(devinfo.u.device.Flags & DEVICE_FLAG_IN_ENCLOSURE) ? "E" : "",
+				devinfo.u.device.PathId+1,
+				devinfo.u.device.TargetId+1,
+				devinfo.u.device.IdentifyData.ModelNumber, sn,
+				(devinfo.u.device.Flags & DEVICE_FLAG_DISABLED)? "Disabled" : "Normal"
+			);
+		}
 		else {
 			memcpy(sn, devinfo.u.device.IdentifyData.SerialNumber,
 				sizeof(devinfo.u.device.IdentifyData.SerialNumber));
 			ldm_ide_fixstring(sn, (sizeof(sn) & (~1)));
-			sn[sizeof(sn) - 1] = 0;			
+			sn[sizeof(sn) - 1] = 0;
 			hpt_copy_info(pinfo, "%d/%s%d/%d %s-%s, %dMB, %s %s%s%s%s\n",
 				devinfo.u.device.ControllerId+1,
 				(devinfo.u.device.Flags & DEVICE_FLAG_IN_ENCLOSURE) ? "E" : "",
