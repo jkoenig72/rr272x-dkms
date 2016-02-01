@@ -83,6 +83,7 @@ typedef HPT_U32 DEVICEID;
 #define PDT_HARDDISK    1
 #define PDT_CDROM       2
 #define PDT_TAPE        3
+#define PDT_CHANGER     4
 
 /*
  * Some constants.
@@ -144,6 +145,8 @@ typedef HPT_U32 DEVICEID;
 #define DEVICE_FLAG_ON_PM_PORT      0x00000020 /* PM port */
 #define DEVICE_FLAG_SAS             0x00000040 /* SAS device */
 #define DEVICE_FLAG_IN_ENCLOSURE    0x00000080 /* PathId is enclosure# */
+#define DEVICE_FLAG_TAPE            0x00000200 /* SAS Tape device */
+#define DEVICE_FLAG_CHANGER         0x00000400 /* SAS Changer device */
 #define DEVICE_FLAG_UNINITIALIZED   0x00010000 /* device is not initialized, can't be used to create array */
 #define DEVICE_FLAG_LEGACY          0x00020000 /* single disk & mbr contains at least one partition */
 #define DEVICE_FLAG_BAD_SECTOR_FOUND	0x00040000 /* found bad sector on target disk, set and clear by GUI */
@@ -343,6 +346,7 @@ typedef HPT_U32 DEVICEID;
 
 #define HPT_CAP_DUMP_METADATA   0x1
 #define HPT_CAP_DISK_CHECKING   0x2
+#define HPT_CAP_REPORT_SECTOR_SIZE  0x10
 
 typedef struct _DRIVER_CAPABILITIES {
 	HPT_U32 dwSize;
@@ -789,7 +793,7 @@ typedef struct _IDENTIFY_DATA2 {
 	HPT_U16 NumberOfCurrentCylinders;
 	HPT_U16 NumberOfCurrentHeads;
 	HPT_U16 CurrentSectorsPerTrack;
-	HPT_U32 CurrentSectorCapacity;
+	HPT_U32 CurrentSectorCapacity; /*word58,59  the value indecate the logical sector size. */
 	HPT_U16 CurrentMultiSectorSetting;
 	HPT_U32 UserAddressableSectors;
 	HPT_U8  SingleWordDMASupport;
