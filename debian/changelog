@@ -1,3 +1,9 @@
+rr272x (1.5.18-1) unstable; urgency=medium
+
+  * Different version
+
+ -- Lennart Weller <lhw@ring0.de>  Mon, 01 Feb 2016 22:09:36 +0100
+
 rr272x (1.6.1-4) unstable; urgency=medium
 
   * Reproducible build warning on jessie
