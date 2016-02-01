@@ -25,3 +25,14 @@
  	OBJ=ko
  	MODVER=`modinfo -F vermagic ${PWD}/${TARGETNAME}.${OBJ} | cut -d' ' -f1`
  	;;
+--- a/product/rr272x/linux/config.c
++++ b/product/rr272x/linux/config.c
+@@ -24,7 +24,7 @@
+ 
+ char driver_name[] = "rr272x_1x";
+ char driver_name_long[] = "RocketRAID 272x_1x controller driver";
+-char driver_ver[] = "v1.6.1 (" __DATE__ " " __TIME__ ")";
++char driver_ver[] = "v1.6.1";
+ int  osm_max_targets = 32;
+ int os_max_cache_size = 0x2000000;
+ 
