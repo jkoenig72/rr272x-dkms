@@ -16,11 +16,32 @@ module_param(autorebuild, int, 0);
 MODULE_PARM(autorebuild, "i");
 #endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,9)
+struct scsi_lun {
+		HPT_U8 scsi_lun[8];
+};
+
+void int_to_scsilun(unsigned int lun, struct scsi_lun *scsilun)
+{
+	int i;
+
+	memset(scsilun->scsi_lun, 0, sizeof(scsilun->scsi_lun));
+
+	for (i = 0; i < sizeof(lun); i += 2) {
+		scsilun->scsi_lun[i] = (lun >> 8) & 0xFF;
+		scsilun->scsi_lun[i+1] = lun & 0xFF;
+		lun = lun >> 16;
+	}
+}
+#endif
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,12))
+
 /* notifier block to get notified on system shutdown/halt/reboot */
 static int hpt_halt(struct notifier_block *nb, ulong event, void *buf);
 static struct notifier_block hpt_notifier = {
 	hpt_halt, NULL, 0
 };
+#endif
 
 static int hpt_init_one(HIM *him, struct pci_dev *pcidev)
 {
@@ -32,18 +53,35 @@ static int hpt_init_one(HIM *him, struct pci_dev *pcidev)
 	
 	if (pci_enable_device(pcidev)) {
 		os_printk("failed to enable the pci device");
-		return -1;
+		goto failed;
 	}
 
-	pci_set_master(pcidev);
+	if (pci_request_regions(pcidev, driver_name)) {
+		os_printk("failed to request regions");
+		goto disable_device;
+	}
 
 	/* enable 64-bit DMA if possible */
 	if (pci_set_dma_mask(pcidev, 0xffffffffffffffffULL)) {
 		if (pci_set_dma_mask(pcidev, 0xffffffffUL)) {
 			os_printk("failed to set DMA mask\n");
-			return -1;
+			goto release_region;
+		}
+		else if (pci_set_consistent_dma_mask(pcidev, 0xffffffffUL)) {
+			os_printk("failed to set DMA mask\n");
+			goto release_region;
 		}
 	}
+	else {
+		if (pci_set_consistent_dma_mask(pcidev, 0xffffffffffffffffULL)) {
+			if (pci_set_consistent_dma_mask(pcidev, 0xffffffffUL)) {
+				os_printk("failed to set DMA mask\n");
+				goto release_region;
+			}
+		}
+	}
+
+	pci_set_master(pcidev);
 
 	pci_id.vid = pcidev->vendor;
 	pci_id.did = pcidev->device;
@@ -53,7 +91,7 @@ static int hpt_init_one(HIM *him, struct pci_dev *pcidev)
 	size = him->get_adapter_size(&pci_id);
 	hba = kmalloc(sizeof(HBA) + size, GFP_ATOMIC);
 	if (!hba)
-		return -1;
+		goto release_region;
 
 	memset(hba, 0, sizeof(HBA));
 	hba->ext_type = EXT_TYPE_HBA;
@@ -67,8 +105,7 @@ static int hpt_init_one(HIM *him, struct pci_dev *pcidev)
 
 	if (!him->create_adapter(&pci_id, hba->pciaddr,
 			hba->ldm_adapter.him_handle, hba)) {
-		kfree(hba);
-		return -1;
+		goto freehba;
 	}
 
 	os_printk("adapter at PCI %d:%d:%d, IRQ %d",
@@ -80,11 +117,11 @@ static int hpt_init_one(HIM *him, struct pci_dev *pcidev)
 		vbus_ext = (PVBUS_EXT)__get_free_pages(GFP_ATOMIC, order);
 
 		if (!vbus_ext) {
-			kfree(hba);
-			return -1;
+			goto freehba;
 		}
 		memset(vbus_ext, 0, sizeof(VBUS_EXT));
 		vbus_ext->ext_type = EXT_TYPE_VBUS;
+		vbus_ext->mem_order = order;
 		ldm_create_vbus((PVBUS)vbus_ext->vbus, vbus_ext);
 		ldm_register_adapter(&hba->ldm_adapter);
 	}
@@ -99,6 +136,18 @@ static int hpt_init_one(HIM *him, struct pci_dev *pcidev)
 	}
 
 	return 0;
+
+freehba:
+	kfree(hba);
+
+release_region:
+	pci_release_regions(pcidev);
+
+disable_device:
+	pci_disable_device(pcidev);
+
+failed:
+	return -1;
 }
 
 static int hpt_alloc_mem(PVBUS_EXT vbus_ext)
@@ -107,7 +156,8 @@ static int hpt_alloc_mem(PVBUS_EXT vbus_ext)
 	struct freelist *f;
 	HPT_UINT i;
 	void **p;
-
+	dma_addr_t    dma_addr;
+	
 	for (hba = vbus_ext->hba_list; hba; hba = hba->next)
 		hba->ldm_adapter.him->get_meminfo(hba->ldm_adapter.him_handle);
 
@@ -118,12 +168,11 @@ static int hpt_alloc_mem(PVBUS_EXT vbus_ext)
 			f->tag, f->count, f->size, f->count*f->size));
 		for (i=0; i<f->count; i++) {
 			if(f->size >= 0x20000) {
-				/*workaround for CentOS 5.11(kernel 2.6.18), kmalloc limit 128KB*/
 				int order, size;
 				for (order=0, size=PAGE_SIZE; size<f->size; order++, size<<=1) ;
 				p = (void **)__get_free_pages(GFP_ATOMIC, order);
 			}
-			else	
+			else
 				p = (void **)kmalloc(f->size, GFP_ATOMIC);
 			if (!p) return -1;
 			*p = f->head;
@@ -143,13 +192,14 @@ static int hpt_alloc_mem(PVBUS_EXT vbus_ext)
 		HPT_ASSERT(f->alignment<=PAGE_SIZE);
 
 		for (i=0; i<f->count;) {
-			p = (void **)__get_free_pages(GFP_ATOMIC, order);
+			p = pci_alloc_consistent(vbus_ext->hba_list->pcidev, size, &dma_addr);
 			if (!p) return -1;
 			for (j = size/f->size; j && i<f->count; i++,j--) {
 				*p = f->head;
-				*(BUS_ADDRESS *)(p+1) = (BUS_ADDRESS)virt_to_bus(p);
+				*(BUS_ADDRESS *)(p+1) = (BUS_ADDRESS)dma_addr;
 				f->head = p;
 				p = (void **)((unsigned long)p + f->size);
+				dma_addr = dma_addr + f->size;
 			}
 		}
 	}
@@ -157,10 +207,10 @@ static int hpt_alloc_mem(PVBUS_EXT vbus_ext)
 	HPT_ASSERT(PAGE_SIZE==DMAPOOL_PAGE_SIZE);
 
 	for (i=0; i<os_max_cache_pages; i++) {
-		p = (void **)__get_free_page(GFP_ATOMIC);
+		p = pci_alloc_consistent(vbus_ext->hba_list->pcidev, PAGE_SIZE, &dma_addr);
 		if (!p) return -1;
 		HPT_ASSERT(((HPT_UPTR)p & (DMAPOOL_PAGE_SIZE-1))==0);
-		dmapool_put_page((PVBUS)vbus_ext->vbus, p, (BUS_ADDRESS)virt_to_bus(p));
+		dmapool_put_page((PVBUS)vbus_ext->vbus, p, (BUS_ADDRESS)dma_addr);
 	}
 
 	vbus_ext->sd_flags = kmalloc(sizeof(HPT_U8)*osm_max_targets, GFP_ATOMIC);
@@ -187,7 +237,6 @@ static void hpt_free_mem(PVBUS_EXT vbus_ext)
 #endif
 		while ((p=freelist_get(f))) {
 			if(f->size >= 0x20000) {
-				/*workaround for CentOS 5.11(kernel 2.6.18), kmalloc limit 128KB*/
 				int order, size;
 				for (order=0, size=PAGE_SIZE; size<f->size; order++, size<<=1) ;
 				free_pages((unsigned long)p, order);
@@ -199,8 +248,9 @@ static void hpt_free_mem(PVBUS_EXT vbus_ext)
 
 	for (i=0; i<os_max_cache_pages; i++) {
 		p = dmapool_get_page((PVBUS)vbus_ext->vbus, &bus);
+
 		HPT_ASSERT(p);
-		free_page((unsigned long)p);
+		pci_free_consistent(vbus_ext->hba_list->pcidev, PAGE_SIZE, p, bus);
 	}
 
 	for (f=vbus_ext->freelist_dma_head; f; f=f->next) {
@@ -215,7 +265,7 @@ static void hpt_free_mem(PVBUS_EXT vbus_ext)
 
 		while ((p=freelist_get_dma(f, &bus))) {
 			if (order)
-				free_pages((unsigned long)p, order);
+				pci_free_consistent(vbus_ext->hba_list->pcidev, f->size, p, bus);
 			else {
 				/* can't free immediately since other blocks in
 				   this page may still be in the list */
@@ -226,7 +276,7 @@ static void hpt_free_mem(PVBUS_EXT vbus_ext)
 	}
 
 	while ((p = dmapool_get_page((PVBUS)vbus_ext->vbus, &bus)))
-		free_page((unsigned long)p);
+		pci_free_consistent(vbus_ext->hba_list->pcidev, PAGE_SIZE, p, bus);
 
 	kfree(vbus_ext->sd_flags);
 }
@@ -283,6 +333,7 @@ static void ldm_initialize_vbus_done(void *osext)
 
 static int hpt_detect (Scsi_Host_Template *tpnt)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
 	struct pci_dev *pcidev;
 	HIM       *him;
 	int       i;
@@ -416,7 +467,15 @@ static int hpt_detect (Scsi_Host_Template *tpnt)
 		if (vbus_ext->tasks)
 			tasklet_schedule(&vbus_ext->worker);
 	}
+#else 
+	PVBUS_EXT vbus_ext;
+	PVBUS vbus;
+	int i = 0;
 
+	ldm_for_each_vbus(vbus, vbus_ext) {
+		i++;
+	}
+#endif
 	return i;
 }
 
@@ -529,10 +588,12 @@ static inline void scsicmd_buf_put(struct scsi_cmnd *cmd, void *buf)
 #ifdef SAM_STAT_CHECK_CONDITION
 #define  HPT_SAM_STAT_CHECK_CONDITION SAM_STAT_CHECK_CONDITION
 #define  HPT_SAM_STAT_GOOD SAM_STAT_GOOD
+#define  HPT_SAM_STAT_BUSY SAM_STAT_BUSY
 #else 
 /*deprecated as they are shifted 1 bit right in SAM-3 Status code*/
 #define  HPT_SAM_STAT_CHECK_CONDITION CHECK_CONDITION
 #define  HPT_SAM_STAT_GOOD GOOD
+#define  HPT_SAM_STAT_BUSY BUSY
 #endif
 
 /*For un-implemented page/subpage code by device, mode sense shall be terminated with
@@ -916,7 +977,7 @@ static void hpt_scsi_pass_through_done(PCOMMAND pCmd)
 	Scsi_Cmnd *SCpnt = pCmd->priv;
 	HPT_U8 ScsiStatus = pCmd->uCmd.ScsiExt.scsiStatus;
 
-	if (ScsiStatus == SAM_STAT_GOOD) {
+	if (ScsiStatus == HPT_SAM_STAT_GOOD) {
 		HPT_U32 dataLength;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,23)
 		dataLength = scsi_bufflen(SCpnt);
@@ -933,7 +994,7 @@ static void hpt_scsi_pass_through_done(PCOMMAND pCmd)
 		}
 		SCpnt->result = (DID_OK << 16); 
 	}
-	else if (ScsiStatus == SAM_STAT_CHECK_CONDITION) {
+	else if (ScsiStatus == HPT_SAM_STAT_CHECK_CONDITION) {
 		SCpnt->result = (DRIVER_SENSE << 24) | HPT_SAM_STAT_CHECK_CONDITION;
 		KdPrint(("hpt_queuecommand(%p) %d/%d/%d cdb=(%08x-%08x-%08x-%08x)", SCpnt,
 					sc_channel(SCpnt), sc_target(SCpnt), sc_lun(SCpnt),
@@ -943,7 +1004,7 @@ static void hpt_scsi_pass_through_done(PCOMMAND pCmd)
 					cpu_to_be32(((HPT_U32 *)SCpnt->cmnd)[3])));
 
 	}
-	else if (ScsiStatus == SAM_STAT_BUSY) {
+	else if (ScsiStatus == HPT_SAM_STAT_BUSY) {
 		SCpnt->result = (DID_BUS_BUSY << 16);
 	}
 	else {
@@ -1709,6 +1770,7 @@ cmd_done:
 static DEF_SCSI_QCMD(hpt_queuecommand)
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,0) /* 2.666666.x */
 static int hpt_slave_config(struct scsi_device *sdev)
 {
 	struct request_queue *q = sdev->request_queue;
@@ -1732,6 +1794,7 @@ static int hpt_slave_config(struct scsi_device *sdev)
 	}
 	return 0;
 }
+#endif
 
 static int hpt_reset (Scsi_Cmnd *SCpnt)
 {
@@ -1855,6 +1918,7 @@ wait:
 	return result;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
 /*
  * flush, unregister, and free all resources of a vbus_ext.
  * vbus_ext will be invalid after this function.
@@ -1894,6 +1958,9 @@ static void hpt_cleanup(PVBUS_EXT vbus_ext)
 
 	ldm_release_vbus(vbus);
 
+	pci_release_regions(vbus_ext->hba_list->pcidev);
+	pci_disable_device(vbus_ext->hba_list->pcidev);
+
 	hpt_free_mem(vbus_ext);
 
 	while ((hba=vbus_ext->hba_list)) {
@@ -1932,9 +1999,11 @@ static int hpt_halt(struct notifier_block *nb, ulong event, void *buf)
 	}
 	return NOTIFY_OK;
 }
+#endif
 
 static int hpt_release (struct Scsi_Host *host)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
 	PVBUS_EXT vbus_ext = get_vbus_ext(host);
 
 	hpt_cleanup(vbus_ext);
@@ -1943,6 +2012,7 @@ static int hpt_release (struct Scsi_Host *host)
 		unregister_reboot_notifier(&hpt_notifier);
 
 	scsi_unregister(host);
+#endif
 	return 0;
 }
 
@@ -2596,8 +2666,11 @@ static Scsi_Host_Template driver_template = {
 #endif
 	max_sectors:            128,
 #endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,0) /* 2.666666.x */
 	slave_configure:        hpt_slave_config,
-	this_id:                 -1
+#endif
+	this_id:                 -1,
+	module:			THIS_MODULE
 };
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
@@ -2607,60 +2680,258 @@ EXPORT_NO_SYMBOLS;
 
 #else 
 
+static int hpt_init_all(HIM *him, struct pci_dev *dev)
+{
+	PCI_ID pci_id;
+	PHBA hba = NULL;
+	PVBUS vbus;
+	PVBUS_EXT vbus_ext;
+	int count = -1;
+	HPT_U8 reached = 0;
+	struct Scsi_Host *host = NULL;
+	spinlock_t initlock;
+
+	ldm_for_each_vbus(vbus, vbus_ext) {
+		hba = vbus_ext->hba_list;
+		if (hba->pcidev == dev) {
+			count = him->get_controller_count(&pci_id, &reached, &hba->pciaddr);
+			break;
+		}
+	}
+
+	HPT_ASSERT(count >= reached);
+
+	if (reached && (count == reached) ) {
+		if (hpt_alloc_mem(vbus_ext)) {
+			OsPrint(("failed to allocate memory"));
+			goto freeresource;
+		}
+
+		spin_unlock_irq_io_request_lock;
+		spin_lock_init(&initlock);
+		vbus_ext->lock = &initlock;
+		init_timer(&vbus_ext->timer);
+		
+		for (hba = vbus_ext->hba_list; hba; hba = hba->next) {
+			if (!hba->ldm_adapter.him->initialize(hba->ldm_adapter.him_handle)) {
+				os_printk("fail to initialize hardware");
+				goto freemem;
+			}
+		}
+
+		sema_init(&vbus_ext->sem, 0);
+		spin_lock_irq(&initlock);
+		ldm_initialize_vbus_async(vbus,
+					  &vbus_ext->hba_list->ldm_adapter,
+					  ldm_initialize_vbus_done);
+		spin_unlock_irq(&initlock);
+
+		if (down_interruptible(&vbus_ext->sem)) {
+			os_printk("init interrupted");
+			goto freeirq;
+		}
+
+		spin_lock_irq(&initlock);
+		ldm_set_autorebuild(vbus, autorebuild);
+		spin_unlock_irq(&initlock);
+
+		host = scsi_host_alloc(&driver_template, sizeof(void *));
+		if (!host) {
+			os_printk("scsi_register failed");
+			goto freeirq;
+		}
+
+		get_vbus_ext(host) = vbus_ext;
+		vbus_ext->host = host;
+		set_vbus_lock(vbus_ext);
+
+		pci_set_drvdata(dev, host);
+
+#ifdef CONFIG_SCSI_PROC_FS
+		host->max_id = osm_max_targets;
+#else 
+		host->max_id = osm_max_targets + 1;
+#endif
+		host->max_lun = 128;
+		host->max_channel = 0;
+		scsi_set_max_cmd_len(host, 16);
+
+		for (hba = vbus_ext->hba_list; hba; hba = hba->next) {
+			if (request_irq(hba->pcidev->irq,
+					hpt_intr, HPT_SA_SHIRQ, driver_name, hba)<0) {
+				os_printk("Error requesting");
+				goto freeirq;
+			}
+			hba->ldm_adapter.him->intr_control(hba->ldm_adapter.him_handle, HPT_TRUE);
+			hba->flags |= HBA_FLAG_IRQ_INSTALLED;
+		}
+
+		host->irq = vbus_ext->hba_list->pcidev->irq;
+
+		tasklet_init(&vbus_ext->worker,
+			     (void (*)(unsigned long))hpt_do_tasks, (HPT_UPTR)vbus_ext);
+		if (vbus_ext->tasks)
+			tasklet_schedule(&vbus_ext->worker);
+
+		if (scsi_add_host(host, &dev->dev)) {
+			printk(KERN_ERR "scsi%d: scsi_add_host failed\n",
+			       host->host_no);
+			goto freeirq;
+		}
+
+		scsi_scan_host(host);
+	}
+
+	return 0;
+
+freeirq:
+	for (hba = vbus_ext->hba_list; hba; hba = hba->next) {
+		if (hba->flags & HBA_FLAG_IRQ_INSTALLED) {
+			hba->flags &= ~HBA_FLAG_IRQ_INSTALLED;
+			free_irq(hba->pcidev->irq, hba);
+		}
+	}
+
+freemem:
+	hpt_free_mem(vbus_ext);
+
+freeresource:
+	for (hba = vbus_ext->hba_list; hba; hba = hba->next) {
+		
+		pci_release_regions(hba->pcidev);
+		pci_disable_device(hba->pcidev);
+		kfree(hba);
+	}
+	
+	return -1;
+}
+
+static int hpt_probe(struct pci_dev *dev, const struct pci_device_id *id)
+{
+	HIM *him;
+	int i;
+	PCI_ID pci_id;
+
+	for (him = him_list; him; him = him->next) {
+		for (i=0; him->get_supported_device_id(i, &pci_id); i++) {
+			if (him->get_controller_count)
+				him->get_controller_count(&pci_id, 0, 0);
+			if (pci_id.did == id->device) {
+				if (hpt_init_one(him, dev)) {
+					return -1;
+				}
+				return hpt_init_all(him, dev);
+			}
+		}
+	}
+
+	return -1;
+
+}
+
+static void hpt_remove(struct pci_dev *dev)
+{
+	PVBUS_EXT vbus_ext;
+	PVBUS vbus;
+	PHBA hba, thishba, prevhba;
+	unsigned long flags;
+	int i;
+	struct Scsi_Host *host = NULL;
+
+	ldm_for_each_vbus(vbus, vbus_ext) {
+		prevhba = NULL;
+		thishba = NULL;
+		for (hba = vbus_ext->hba_list; hba; prevhba = hba, hba = hba->next) {
+			if (hba->pcidev == dev) {
+				thishba = hba;
+				host = pci_get_drvdata(vbus_ext->hba_list->pcidev);
+				goto found;
+			}
+		}
+	}
+
+	HPT_ASSERT(0);
+	return;
+found:
+
+	if (host) {
+		/* stop all ctl tasks and disable the worker tasklet */
+		hpt_stop_tasks(vbus_ext);
+		tasklet_kill(&vbus_ext->worker);
+		vbus_ext->worker.func = 0;
+
+		scsi_remove_host(host);
+
+		/* flush devices */
+		for (i=0; i<osm_max_targets; i++) {
+			PVDEV vd = ldm_find_target(vbus, i);
+			if (vd) {
+				/* retry once */
+				if (hpt_flush_vdev(vbus_ext, vd))
+					hpt_flush_vdev(vbus_ext, vd);
+			}
+		}
+
+		spin_lock_irqsave(vbus_ext->lock, flags);
+
+		del_timer_sync(&vbus_ext->timer);
+		ldm_shutdown(vbus);
+
+		spin_unlock_irqrestore(vbus_ext->lock, flags);
+
+		scsi_host_put(host);
+
+		pci_set_drvdata(vbus_ext->hba_list->pcidev, NULL);
+	}
+
+	if (vbus_ext->host) {
+		free_irq(dev->irq, hba);
+	}
+
+	kfree(hba);
+	/*if ((vbus_ext->hba_list == NULL) && vbus_ext->host)*/ { /* ALL REMOVED */
+		ldm_release_vbus(vbus);
+
+		free_pages((unsigned long)vbus_ext, vbus_ext->mem_order);
+		hpt_free_mem(vbus_ext);
+	}
+
+	pci_release_regions(dev);
+	pci_disable_device(dev);
+}
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,12))
+static void hpt_shutdown(struct pci_dev *dev)
+{
+	/* TODO: shutdown only flush device and disable IRQ */
+	hpt_remove(dev);
+}
+#endif
+
+extern const struct pci_device_id hpt_pci_tbl[];
+static struct pci_driver hpt_pci_driver = {
+	.name     = driver_name,
+	.id_table = hpt_pci_tbl,
+	.probe    = hpt_probe,
+	.remove   = hpt_remove,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,12))
+	.shutdown = hpt_shutdown,
+#endif
+};
+
 /* scsi_module.c is deprecated in kernel 2.6 */
 static int __init init_this_scsi_driver(void)
 {
-	struct scsi_host_template *sht = &driver_template;
-	struct Scsi_Host *shost;
-	struct list_head *l;
-	int error;
+	os_printk("%s %s", driver_name_long, driver_ver);
 
-	if (!sht->release) {
-		printk(KERN_ERR
-			"scsi HBA driver %s didn't set a release method.\n",
-			sht->name);
-		return -EINVAL;
-	}
+	init_config();
 
-	sht->module = THIS_MODULE;
-	INIT_LIST_HEAD(&sht->legacy_hosts);
-
-	sht->detect(sht);
-	if (list_empty(&sht->legacy_hosts))
-		return -ENODEV;
-
-	list_for_each_entry(shost, &sht->legacy_hosts, sht_legacy_list) {
-		error = scsi_add_host(shost, &get_vbus_ext(shost)->hba_list->pcidev->dev);
-		if (error)
-			goto fail;
-		scsi_scan_host(shost);
-	}
-	return 0;
- fail:
-	l = &shost->sht_legacy_list;
-	while ((l = l->prev) != &sht->legacy_hosts)
-		scsi_remove_host(list_entry(l, struct Scsi_Host, sht_legacy_list));
-	return error;
+	return pci_register_driver(&hpt_pci_driver);
 }
 
 static void __exit exit_this_scsi_driver(void)
 {
-	struct scsi_host_template *sht = &driver_template;
-	struct Scsi_Host *shost, *s;
-
-	list_for_each_entry(shost, &sht->legacy_hosts, sht_legacy_list)
-		scsi_remove_host(shost);
-	list_for_each_entry_safe(shost, s, &sht->legacy_hosts, sht_legacy_list)
-		sht->release(shost);
-
-	if (list_empty(&sht->legacy_hosts))
-		return;
-
-	printk(KERN_WARNING "%s did not call scsi_unregister\n", sht->name);
-	dump_stack();
-
-	list_for_each_entry_safe(shost, s, &sht->legacy_hosts, sht_legacy_list)
-		scsi_unregister(shost);
+	pci_unregister_driver(&hpt_pci_driver);
 }
 
 module_init(init_this_scsi_driver);
