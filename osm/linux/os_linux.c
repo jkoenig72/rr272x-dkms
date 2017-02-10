@@ -364,18 +364,30 @@ void refresh_sd_flags(PVBUS_EXT vbus_ext)
 						blkdev_get(bdev, FMODE_READ, 0 __BDEV_RAW)
 #endif
 						==0) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)
+						if (bdev->bd_disk && ((disk_to_dev(bdev->bd_disk)->parent)==&SDptr->sdev_gendev)) {
+#else 
 						if (bdev->bd_disk && bdev->bd_disk->driverfs_dev==&SDptr->sdev_gendev) {
+#endif
 							if (vbus_ext->sd_flags[id] & SD_FLAG_REVALIDATE) {
 								if (bdev->bd_disk->fops->revalidate_disk)
 									bdev->bd_disk->fops->revalidate_disk(bdev->bd_disk);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,15)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,7,0)
+								inode_lock(bdev->bd_inode);
+#else 
 								mutex_lock(&bdev->bd_inode->i_mutex);
+#endif
 #else 
 								down(&bdev->bd_inode->i_sem);
 #endif
 								i_size_write(bdev->bd_inode, (loff_t)get_capacity(bdev->bd_disk)<<9);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,15)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,7,0)
+								inode_unlock(bdev->bd_inode);
+#else 
 								mutex_unlock(&bdev->bd_inode->i_mutex);
+#endif
 #else 
 								up(&bdev->bd_inode->i_sem);
 #endif
@@ -616,6 +628,8 @@ void os_schedule_task(void *osext, OSM_TASK *task)
 
 HPT_U8 os_get_vbus_seq(void *osext)
 {
+	if(!((PVBUS_EXT)osext)->host)
+		return 0;
 	return ((PVBUS_EXT)osext)->host->host_no;
 }
 

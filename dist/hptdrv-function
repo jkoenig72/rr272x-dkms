@@ -358,7 +358,7 @@ installkerndev_fedora()
     if test "$kernelrpm" != ""; then
       local develrpm=`rpm -q $kernelrpm --queryformat %{NAME}-devel-%{VERSION}-%{RELEASE}`
       logecho "installkerndev:install package $develrpm"
-      yum -y --quiet install $develrpm >>$logfile 2>&1
+      yum -y --quiet install ${develrpm/-core/} >>$logfile 2>&1
     fi
   fi
   #yum -y --quiet install kernel-devel-$1 >>$logfile 2>&1
@@ -599,7 +599,11 @@ detectenv()
   curver=$(uname -r)
   logecho "detectenv:current:${curver}"
   logecho "${kernels}"
-  lsinitrd=`type -p lsinitrd`
+  lsinitrd=`type -p lsinitramfs`
+  if test "${lsinitrd}" = ""; then
+	  lsinitrd=`type -p lsinitrd`
+  fi
+
   for kernel in ${kernels}; do
     kerver=`kernelver ${kernel}`
     logecho "\`-${kerver}"
@@ -994,7 +998,10 @@ fixboot()
   current=""
   initrdtype=""
   compress=""
-  lsinitrd=`type -p lsinitrd`
+  lsinitrd=`type -p lsinitramfs`
+  if test "${lsinitrd}" = ""; then
+	  lsinitrd=`type -p lsinitrd`
+  fi
   if test -f $lock; then
     logcat "${lock}"
     source $lock
@@ -1090,7 +1097,11 @@ fixboot()
 
     if test -f "${initrdfile}"; then
       if test "${lsinitrd}" != ""; then 
-        initmods=$("$lsinitrd" "${initrdfile}" | grep \.ko$ | rev | cut -d/ -f1 | rev | while read line; do basename $line .ko; done)
+        _initmods=$("$lsinitrd" "${initrdfile}" | grep \.ko$ | rev | cut -d/ -f1 | rev | while read line; do basename $line .ko; done)
+        _initmodsxz=$("$lsinitrd" "${initrdfile}" | grep \.ko.xz$ | rev | cut -d/ -f1 | rev | while read line; do basename $line .ko.xz; done)
+        _initmodsgz=$("$lsinitrd" "${initrdfile}" | grep \.ko.gz$ | rev | cut -d/ -f1 | rev | while read line; do basename $line .ko.gz; done)
+        _initmodsbz2=$("$lsinitrd" "${initrdfile}" | grep \.ko.bz2$ | rev | cut -d/ -f1 | rev | while read line; do basename $line .ko.bz2; done)
+	initmods="${_initmods} ${_initmodsxz} ${_initmodsgz} ${_initmodsbz2}"
       else
         initmods=$("${compress}" -dc "${initrdfile}" | cpio -t --quiet 2>/dev/null | grep \\.ko | while read line; do basename $line .ko; done)
       fi
