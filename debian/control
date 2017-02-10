@@ -2,7 +2,7 @@ Source: rr272x
 Section: kernel
 Priority: optional
 Maintainer: Lennart Weller <lhw@ring0.de>
-Standards-Version: 3.9.6
+Standards-Version: 3.9.8
 Build-Depends: debhelper (>= 9), dkms
 
 Package: rr272x-dkms
